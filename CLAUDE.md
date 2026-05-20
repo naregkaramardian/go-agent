@@ -490,20 +490,20 @@ passing required after setup.
 [x] LLM client interface + Anthropic implementation
 [x] Streaming response handler
 [x] Tool interface + registry + schema generation
-[ ] Conversation context manager with token tracking
+[x] Conversation context manager with token tracking
 [ ] Guardrails middleware chain
 [ ] Short-term memory buffer
 [ ] Long-term memory with vector store
-[ ] Basic agent loop (plan/act/observe)
+[x] Basic agent loop (plan/act/observe)
 [x] Built-in tools (bash, file read/write, HTTP)
 [ ] CLI harness for interactive testing
 [x] observability/logger.go — slog setup + traceHandler wrapper
 [x] observability/tracer.go — OpenTelemetry provider + OTLP exporter
 [x] observability/metrics.go — Prometheus metrics registry
 [x] observability/cost.go — CostLedger with per-model pricing
-[ ] observability/middleware.go — ObserveTool + ObserveLLM wrappers
+[x] observability/middleware.go — ObserveTool + ObserveLLM wrappers
 [x] /metrics HTTP endpoint (Prometheus scrape target)
-[ ] Trace context auto-propagated through all goroutines
+[x] Trace context auto-propagated through all goroutines
 [ ] Cost budget guardrail wired to CostLedger
 
 ## Design Notes
