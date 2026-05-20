@@ -487,8 +487,8 @@ passing required after setup.
 
 ## Current Status
 [x] Project scaffold and module init
-[ ] LLM client interface + Anthropic implementation
-[ ] Streaming response handler
+[x] LLM client interface + Anthropic implementation
+[x] Streaming response handler
 [ ] Tool interface + registry + schema generation
 [ ] Basic agent loop (plan/act/observe)
 [ ] Conversation context manager with token tracking
