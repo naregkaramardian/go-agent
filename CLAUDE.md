@@ -489,13 +489,13 @@ passing required after setup.
 [x] Project scaffold and module init
 [x] LLM client interface + Anthropic implementation
 [x] Streaming response handler
-[ ] Tool interface + registry + schema generation
-[ ] Basic agent loop (plan/act/observe)
+[x] Tool interface + registry + schema generation
 [ ] Conversation context manager with token tracking
 [ ] Guardrails middleware chain
 [ ] Short-term memory buffer
 [ ] Long-term memory with vector store
-[ ] Built-in tools (bash, file read/write, HTTP)
+[ ] Basic agent loop (plan/act/observe)
+[x] Built-in tools (bash, file read/write, HTTP)
 [ ] CLI harness for interactive testing
 [x] observability/logger.go — slog setup + traceHandler wrapper
 [x] observability/tracer.go — OpenTelemetry provider + OTLP exporter
