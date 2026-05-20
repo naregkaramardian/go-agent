@@ -1,0 +1,30 @@
+# Binaries
+/go-agent
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binaries
+*.test
+*.out
+
+# Go build cache
+/vendor/
+
+# Environment / secrets
+.env
+.env.*
+*.pem
+*.key
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Prometheus / OTel local data
+/data/
