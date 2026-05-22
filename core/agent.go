@@ -14,6 +14,7 @@ import (
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/nareg/goagent/guardrails"
 	"github.com/nareg/goagent/llm"
 	"github.com/nareg/goagent/observability"
 	"github.com/nareg/goagent/tools"
@@ -38,10 +39,17 @@ type RunResult struct {
 
 // Agent is the main runtime: it drives the plan → act → observe loop.
 type Agent struct {
-	cfg      AgentConfig
-	llm      llm.LLMClient
-	registry *tools.Registry
-	buffer   *ConversationBuffer
+	cfg        AgentConfig
+	llm        llm.LLMClient
+	registry   *tools.Registry
+	buffer     *ConversationBuffer
+	guardrails []guardrails.Middleware
+}
+
+// Use appends guardrail middleware to the agent. Call before Run.
+// Guards run in registration order: mw[0] is outermost (first to execute).
+func (a *Agent) Use(mw ...guardrails.Middleware) {
+	a.guardrails = append(a.guardrails, mw...)
 }
 
 // NewAgent constructs an Agent. The ConversationBuffer must be pre-configured
@@ -149,18 +157,36 @@ func (a *Agent) Run(ctx context.Context, userMsg string) (*RunResult, error) {
 func (a *Agent) runStep(ctx context.Context, step int, output *string) (terminal bool, err error) {
 	log := observability.LoggerFrom(ctx)
 
-	resp, err := a.llm.Complete(ctx, &llm.CompletionRequest{
-		Model:     a.cfg.Model,
-		System:    a.cfg.System,
-		Messages:  a.buffer.Messages(),
-		Tools:     a.toolDefs(),
-		MaxTokens: a.cfg.MaxTokens,
+	// The base handler calls the LLM and populates AgentStep.Response.
+	base := guardrails.StepHandler(func(ctx context.Context, s guardrails.AgentStep) (guardrails.AgentStep, error) {
+		resp, err := a.llm.Complete(ctx, &llm.CompletionRequest{
+			Model:     a.cfg.Model,
+			System:    a.cfg.System,
+			Messages:  a.buffer.Messages(),
+			Tools:     a.toolDefs(),
+			MaxTokens: a.cfg.MaxTokens,
+		})
+		if err != nil {
+			return s, fmt.Errorf("agent.runStep[%d]: llm.Complete: %w", step, err)
+		}
+		s.Response = resp
+		return s, nil
+	})
+
+	s, err := guardrails.Chain(base, a.guardrails...)(ctx, guardrails.AgentStep{
+		Number:     step,
+		TokenCount: a.buffer.TokenCount(),
 	})
 	if err != nil {
 		observability.AgentStepsTotal.WithLabelValues(a.cfg.AgentID, "error").Inc()
-		return false, fmt.Errorf("agent.runStep[%d]: llm.Complete: %w", step, err)
+		return false, err
+	}
+	if s.Response == nil {
+		observability.AgentStepsTotal.WithLabelValues(a.cfg.AgentID, "error").Inc()
+		return false, fmt.Errorf("agent.runStep[%d]: guardrail returned nil response", step)
 	}
 	observability.AgentStepsTotal.WithLabelValues(a.cfg.AgentID, "ok").Inc()
+	resp := s.Response
 
 	// Terminal: model finished and requested no tools.
 	if (resp.StopReason == llm.StopReasonEndTurn || resp.StopReason == "") && len(resp.ToolCalls) == 0 {

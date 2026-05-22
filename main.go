@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/nareg/goagent/core"
+	"github.com/nareg/goagent/guardrails"
 	"github.com/nareg/goagent/llm"
 	"github.com/nareg/goagent/observability"
 	"github.com/nareg/goagent/tools"
@@ -92,6 +93,12 @@ func main() {
 		MaxSteps:  20,
 		MaxTokens: 1024,
 	}, client, reg, buf)
+	agent.Use(
+		guardrails.MaxSteps(20),
+		guardrails.TokenBudget(100_000),
+		guardrails.CostBudget(1.00),
+		guardrails.LoopDetection(5),
+	)
 
 	result, err := agent.Run(ctx, "What is 2+2? Reply with just the number.")
 	if err != nil {

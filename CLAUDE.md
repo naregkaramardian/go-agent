@@ -491,7 +491,7 @@ passing required after setup.
 [x] Streaming response handler
 [x] Tool interface + registry + schema generation
 [x] Conversation context manager with token tracking
-[ ] Guardrails middleware chain
+[x] Guardrails middleware chain
 [ ] Short-term memory buffer
 [ ] Long-term memory with vector store
 [x] Basic agent loop (plan/act/observe)
