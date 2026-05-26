@@ -43,15 +43,17 @@ func runREPL(cmd *cobra.Command, _ []string) error {
 	defer span.End()
 
 	sc := span.SpanContext()
-	model := flags.model
-	if model == "" {
-		model = defaultModel(deps.provider)
+	model, _, _, _ := resolveAgentConfig(deps.provider)
+	agentTypeLabel := flags.agentType
+	if agentTypeLabel == "" {
+		agentTypeLabel = "custom"
 	}
 	fmt.Printf("goagent interactive session\n")
-	fmt.Printf("  Agent ID : %s\n", deps.agentID)
-	fmt.Printf("  Trace ID : %s\n", sc.TraceID().String())
-	fmt.Printf("  Provider : %s\n", deps.provider)
-	fmt.Printf("  Model    : %s\n", model)
+	fmt.Printf("  Agent ID   : %s\n", deps.agentID)
+	fmt.Printf("  Trace ID   : %s\n", sc.TraceID().String())
+	fmt.Printf("  Provider   : %s\n", deps.provider)
+	fmt.Printf("  Model      : %s\n", model)
+	fmt.Printf("  Agent type : %s\n", agentTypeLabel)
 	fmt.Printf("  Metrics  : http://localhost%s/metrics\n", flags.metricsAddr)
 	fmt.Println()
 	fmt.Println("Type your message and press Enter. Ctrl+D to exit.")

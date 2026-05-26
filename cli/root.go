@@ -2,13 +2,16 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"time"
 
+	"github.com/joho/godotenv"
 	"github.com/spf13/cobra"
 
+	"github.com/nareg/goagent/agents"
 	"github.com/nareg/goagent/core"
 	"github.com/nareg/goagent/guardrails"
 	"github.com/nareg/goagent/llm"
@@ -34,10 +37,12 @@ func defaultModel(provider string) string {
 }
 
 type globalFlags struct {
+	envFile      string // path to .env file; "" = auto-detect
 	logFormat    string
 	metricsAddr  string
 	otlpEndpoint string
 	provider     string // "anthropic" | "openai" | "" (auto-detect)
+	agentType    string // preset ID from agents package; "" = custom
 	model        string
 	system       string
 	maxSteps     int
@@ -63,10 +68,12 @@ Provider auto-detection (checked in order):
 
 func init() {
 	f := rootCmd.PersistentFlags()
+	f.StringVar(&flags.envFile, "env-file", ".env", "Path to .env file (set to empty string to disable)")
 	f.StringVar(&flags.logFormat, "log-format", "text", "Log format: text|json")
 	f.StringVar(&flags.metricsAddr, "metrics-addr", ":9090", "Address for Prometheus /metrics endpoint")
 	f.StringVar(&flags.otlpEndpoint, "otlp-endpoint", "", "OTLP collector endpoint (empty = stdout exporter in dev)")
 	f.StringVar(&flags.provider, "provider", "", "LLM provider: anthropic|openai (default: auto-detect from env)")
+	f.StringVar(&flags.agentType, "agent-type", "", "Agent preset ID (see 'goagent agents list'). Overrides --model, --system, --max-steps, --max-tokens.")
 	f.StringVar(&flags.model, "model", "", "Model ID (default depends on provider: gpt-4o-mini or claude-haiku-4-5)")
 	f.StringVar(&flags.system, "system", "You are a helpful AI assistant. Be concise and accurate.", "Agent system prompt")
 	f.IntVar(&flags.maxSteps, "max-steps", 20, "Maximum agent loop iterations per run")
@@ -98,6 +105,14 @@ type infraDeps struct {
 // bootstrap initialises all infrastructure and wires up the agent.
 // The caller must call cleanup() when done, even on error.
 func bootstrap(ctx context.Context) (context.Context, *infraDeps, error) {
+	// Load .env before anything else so env vars are available to all setup code.
+	loadEnvFile(flags.envFile)
+
+	// LOG_FORMAT may come from the .env file, so re-read it after loading.
+	if envFmt := os.Getenv("LOG_FORMAT"); envFmt != "" && flags.logFormat == "text" {
+		flags.logFormat = envFmt
+	}
+
 	logger := observability.NewLogger(flags.logFormat)
 	slog.SetDefault(logger)
 	ctx = observability.WithLogger(ctx, logger)
@@ -131,10 +146,9 @@ func bootstrap(ctx context.Context) (context.Context, *infraDeps, error) {
 		return ctx, &infraDeps{logger: logger, ledger: ledger, cleanup: cleanup}, nil
 	}
 
-	model := flags.model
-	if model == "" {
-		model = defaultModel(provider)
-	}
+	// Resolve effective config: preset values are used as defaults, then
+	// explicit flags override them so power users can still tweak a preset.
+	model, system, maxSteps, maxTokens := resolveAgentConfig(provider)
 
 	// NewAnthropicClient / NewOpenAIClient already prepend ObserveLLM() internally.
 	var client llm.LLMClient
@@ -148,18 +162,19 @@ func bootstrap(ctx context.Context) (context.Context, *infraDeps, error) {
 	logger.InfoContext(ctx, "provider.selected",
 		slog.String("provider", provider),
 		slog.String("model", model),
+		slog.String("agent_type", flags.agentType),
 	)
 
 	buf := core.NewConversationBuffer(flags.tokenBudget)
 	agent := core.NewAgent(core.AgentConfig{
 		Model:     model,
-		System:    flags.system,
-		MaxSteps:  flags.maxSteps,
-		MaxTokens: flags.maxTokens,
+		System:    system,
+		MaxSteps:  maxSteps,
+		MaxTokens: maxTokens,
 	}, client, buildRegistry(), buf)
 
 	agent.Use(
-		guardrails.MaxSteps(flags.maxSteps),
+		guardrails.MaxSteps(maxSteps),
 		guardrails.TokenBudget(flags.tokenBudget),
 		guardrails.LoopDetection(5),
 	)
@@ -206,6 +221,47 @@ func resolveProvider() (string, string, error) {
 	}
 }
 
+// resolveAgentConfig returns (model, system, maxSteps, maxTokens) by merging
+// the selected preset with any explicit CLI flag overrides.
+// Precedence (highest→lowest): explicit flag → preset value → built-in default.
+func resolveAgentConfig(provider string) (model, system string, maxSteps, maxTokens int) {
+	// Start from built-in defaults.
+	model = defaultModel(provider)
+	system = flags.system
+	maxSteps = flags.maxSteps
+	maxTokens = flags.maxTokens
+
+	if flags.agentType != "" {
+		preset, ok := agents.ByID(flags.agentType)
+		if !ok {
+			// Unknown preset — bootstrap will log a warning; fall through to defaults.
+			return
+		}
+		// Apply preset values.
+		model = agents.ModelForTier(provider, preset.RecommendedTier)
+		system = preset.System
+		maxSteps = preset.MaxSteps
+		maxTokens = preset.MaxTokens
+	}
+
+	// Explicit flags always win (non-zero / non-default values override preset).
+	if flags.model != "" {
+		model = flags.model
+	}
+	// system flag default is non-empty, so only override if user explicitly
+	// changed it from its init() default.
+	if flags.agentType == "" && flags.system != "" {
+		system = flags.system
+	}
+	if flags.maxSteps != 20 { // 20 is the init() default
+		maxSteps = flags.maxSteps
+	}
+	if flags.maxTokens != 2048 { // 2048 is the init() default
+		maxTokens = flags.maxTokens
+	}
+	return
+}
+
 // buildRegistry creates the tool registry with all built-in tools.
 func buildRegistry() *tools.Registry {
 	reg := tools.NewRegistry()
@@ -222,6 +278,25 @@ func buildRegistry() *tools.Registry {
 		reg.Register(fw)
 	}
 	return reg
+}
+
+// loadEnvFile loads variables from path into the process environment.
+// Existing env vars are NOT overridden (godotenv.Load semantics).
+// Silently skips if path is empty or the file does not exist.
+func loadEnvFile(path string) {
+	if path == "" {
+		return
+	}
+	err := godotenv.Load(path)
+	if err == nil {
+		return
+	}
+	// Missing file is normal (user may rely on real env vars instead).
+	if errors.Is(err, os.ErrNotExist) {
+		return
+	}
+	// Any other error (malformed file, permissions) is worth surfacing.
+	fmt.Fprintf(os.Stderr, "warning: could not load %s: %v\n", path, err)
 }
 
 // printSummary prints the cost ledger summary to stdout.
