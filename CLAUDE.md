@@ -492,7 +492,7 @@ passing required after setup.
 [x] Tool interface + registry + schema generation
 [x] Conversation context manager with token tracking
 [x] Guardrails middleware chain
-[ ] Short-term memory buffer
+[x] Short-term memory buffer
 [ ] Long-term memory with vector store
 [x] Basic agent loop (plan/act/observe)
 [x] Built-in tools (bash, file read/write, HTTP)
@@ -507,6 +507,15 @@ passing required after setup.
 [ ] Cost budget guardrail wired to CostLedger
 
 ## Design Notes
+- **memory.Buffer vs ConversationBuffer**: `memory.Buffer` (in `memory/buffer.go`) implements the
+  `Memory` interface for semantic fact storage with `Store`/`Recall`. It is distinct from
+  `core.ConversationBuffer` which manages the sliding message window for LLM context. The two
+  complement each other: ConversationBuffer = what was said; memory.Buffer = what should be remembered.
+- **Short-term recall uses keyword-overlap scoring**: `overlapScore` computes the fraction of query
+  words found in entry content (0–1). No embeddings needed for the in-process tier; long-term memory
+  will use vector similarity instead.
+- **BashTool registration fixed**: `NewRegistry()` is now called with no args (ObserveTool is already
+  prepended internally); passing it again would double-count metrics. BashTool is now registered in main.go.
 - **Trace injection requires `*Context` log variants**: `slog.Logger.Info()` uses `context.Background()`
   internally, so `trace_id`/`span_id` are only injected when callers use `log.InfoContext(ctx, ...)`.
   All agent loop code must use the `*Context` variants consistently.

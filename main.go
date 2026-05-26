@@ -55,8 +55,13 @@ func main() {
 	logger.Info("metrics.started", slog.String("addr", metricsAddr))
 
 	// Build the tool registry with built-in tools.
-	reg := tools.NewRegistry(tools.ObserveTool())
+	reg := tools.NewRegistry()
 
+	bashTool, err := builtin.NewBashTool()
+	if err != nil {
+		logger.Error("bash tool init", slog.String("error", err.Error()))
+		os.Exit(1)
+	}
 	httpTool, err := builtin.NewHTTPTool()
 	if err != nil {
 		logger.Error("http tool init", slog.String("error", err.Error()))
@@ -72,6 +77,7 @@ func main() {
 		logger.Error("file write tool init", slog.String("error", err.Error()))
 		os.Exit(1)
 	}
+	reg.Register(bashTool)
 	reg.Register(httpTool)
 	reg.Register(fileRead)
 	reg.Register(fileWrite)
