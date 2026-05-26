@@ -30,10 +30,10 @@ func runREPL(cmd *cobra.Command, _ []string) error {
 	defer deps.cleanup()
 
 	if deps.agent == nil {
-		deps.logger.WarnContext(ctx, "no ANTHROPIC_API_KEY set — exiting")
-		fmt.Fprintln(os.Stderr, "Error: ANTHROPIC_API_KEY environment variable is required for 'run'.")
-		fmt.Fprintln(os.Stderr, "Set it and try again, or use 'goagent ask' for a one-shot query.")
-		return fmt.Errorf("ANTHROPIC_API_KEY not set")
+		deps.logger.WarnContext(ctx, "no API key found — exiting")
+		fmt.Fprintln(os.Stderr, "Error: no API key found. Set ANTHROPIC_API_KEY or OPENAI_API_KEY.")
+		fmt.Fprintln(os.Stderr, "Use --provider to specify which one to use.")
+		return fmt.Errorf("no API key found")
 	}
 
 	// Start a trace for the entire REPL session.
@@ -43,10 +43,15 @@ func runREPL(cmd *cobra.Command, _ []string) error {
 	defer span.End()
 
 	sc := span.SpanContext()
+	model := flags.model
+	if model == "" {
+		model = defaultModel(deps.provider)
+	}
 	fmt.Printf("goagent interactive session\n")
 	fmt.Printf("  Agent ID : %s\n", deps.agentID)
 	fmt.Printf("  Trace ID : %s\n", sc.TraceID().String())
-	fmt.Printf("  Model    : %s\n", flags.model)
+	fmt.Printf("  Provider : %s\n", deps.provider)
+	fmt.Printf("  Model    : %s\n", model)
 	fmt.Printf("  Metrics  : http://localhost%s/metrics\n", flags.metricsAddr)
 	fmt.Println()
 	fmt.Println("Type your message and press Enter. Ctrl+D to exit.")

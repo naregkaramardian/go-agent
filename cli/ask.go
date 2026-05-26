@@ -32,8 +32,8 @@ func runAsk(cmd *cobra.Command, args []string) error {
 	defer deps.cleanup()
 
 	if deps.agent == nil {
-		fmt.Fprintln(os.Stderr, "Error: ANTHROPIC_API_KEY environment variable is required.")
-		return fmt.Errorf("ANTHROPIC_API_KEY not set")
+		fmt.Fprintln(os.Stderr, "Error: no API key found. Set ANTHROPIC_API_KEY or OPENAI_API_KEY.")
+		return fmt.Errorf("no API key found")
 	}
 
 	var message string

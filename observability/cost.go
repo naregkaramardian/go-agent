@@ -12,14 +12,27 @@ type TokenPrice struct {
 }
 
 // ModelPricing maps model IDs to their token prices (USD per 1M tokens).
-// Update this table when Anthropic changes pricing.
+// Update this table when providers change pricing.
 var ModelPricing = map[string]TokenPrice{
+	// Anthropic Claude
 	"claude-opus-4-5":           {Input: 15.00, Output: 75.00},
 	"claude-sonnet-4-5":         {Input: 3.00, Output: 15.00},
 	"claude-haiku-4-5":          {Input: 0.80, Output: 4.00},
 	"claude-haiku-4-5-20251001": {Input: 0.80, Output: 4.00},
 	"claude-opus-4-7":           {Input: 15.00, Output: 75.00},
 	"claude-sonnet-4-6":         {Input: 3.00, Output: 15.00},
+	// OpenAI
+	"gpt-4o":              {Input: 2.50, Output: 10.00},
+	"gpt-4o-mini":         {Input: 0.15, Output: 0.60},
+	"gpt-4o-2024-11-20":   {Input: 2.50, Output: 10.00},
+	"gpt-4-turbo":         {Input: 10.00, Output: 30.00},
+	"gpt-4.1":             {Input: 2.00, Output: 8.00},
+	"gpt-4.1-mini":        {Input: 0.40, Output: 1.60},
+	"gpt-4.1-nano":        {Input: 0.10, Output: 0.40},
+	"gpt-3.5-turbo":       {Input: 0.50, Output: 1.50},
+	"o1":                  {Input: 15.00, Output: 60.00},
+	"o1-mini":             {Input: 3.00, Output: 12.00},
+	"o3-mini":             {Input: 1.10, Output: 4.40},
 }
 
 // CostSummary holds aggregate token and cost totals across all models.

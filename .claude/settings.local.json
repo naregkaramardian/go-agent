@@ -3,7 +3,11 @@
     "allow": [
       "Bash(go test *)",
       "Skill(build-go-agent)",
-      "Bash(go run *)"
+      "Bash(go run *)",
+      "Bash(go get *)",
+      "Bash(go build *)",
+      "Bash(go vet *)",
+      "Bash(OPENAI_API_KEY=\"\" ANTHROPIC_API_KEY=\"\" go run . run)"
     ]
   }
 }
