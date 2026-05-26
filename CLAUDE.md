@@ -505,6 +505,8 @@ passing required after setup.
 [x] /metrics HTTP endpoint (Prometheus scrape target)
 [x] Trace context auto-propagated through all goroutines
 [x] Cost budget guardrail wired to CostLedger
+[x] Multi-agent orchestration (Pipeline, Parallel, ReviewLoop + 4 pre-wired workflows)
+[x] goagent orchestrate CLI command with --workflow flag and list subcommand
 
 ## Design Notes
 - **memory.Buffer vs ConversationBuffer**: `memory.Buffer` (in `memory/buffer.go`) implements the
@@ -536,3 +538,10 @@ passing required after setup.
   Do NOT pass `llm.ObserveLLM()` as an extra middleware — it would double-count metrics and costs.
 - **Cobra added**: `github.com/spf13/cobra v1.10.2` added to go.mod. Viper is not yet included
   (flags are wired via pflag directly, which is sufficient for the current flag set).
+- **Multi-agent orchestration**: `orchestration/` package provides three primitives — `Pipeline`
+  (sequential, each step sees prior outputs via `composeInput`), `Parallel` (concurrent fan-out,
+  results printed in declaration order), and `ReviewLoop` (worker ↔ reviewer cycle; reviewer signals
+  approval with "APPROVED" anywhere in response). Four pre-wired workflows: `code-review`,
+  `feature-build`, `security-audit`, `full-pipeline`. Each workflow is accessible via
+  `goagent orchestrate run --workflow <id> "<task>"`. The `Builder` func in `infraDeps` creates
+  fresh agents per step (empty conversation buffer) using the detected provider + API key.

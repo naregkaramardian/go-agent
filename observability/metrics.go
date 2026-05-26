@@ -121,6 +121,26 @@ var (
 	})
 )
 
+// Orchestration metrics.
+var (
+	OrchestrationRunsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "goagent_orchestration_runs_total",
+		Help: "Total orchestration runs by workflow and status.",
+	}, []string{"workflow", "status"})
+
+	OrchestrationDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "goagent_orchestration_duration_seconds",
+		Help:    "End-to-end orchestration duration.",
+		Buckets: prometheus.DefBuckets,
+	}, []string{"workflow"})
+
+	OrchestrationStepDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "goagent_orchestration_step_duration_seconds",
+		Help:    "Per-step duration within an orchestration.",
+		Buckets: prometheus.DefBuckets,
+	}, []string{"workflow", "step"})
+)
+
 // ServeMetrics starts the Prometheus /metrics HTTP endpoint on addr (e.g. ":9090").
 // Runs in a background goroutine; does not block.
 func ServeMetrics(addr string) {

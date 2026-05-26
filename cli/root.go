@@ -88,6 +88,7 @@ func init() {
 
 	rootCmd.AddCommand(runCmd)
 	rootCmd.AddCommand(askCmd)
+	rootCmd.AddCommand(orchestrateCmd)
 }
 
 // Execute is the CLI entry point called from main.
@@ -104,6 +105,7 @@ type infraDeps struct {
 	agent    *core.Agent
 	agentID  string
 	provider string
+	builder  func(agents.Preset) *core.Agent
 	cleanup  func()
 }
 
@@ -195,12 +197,42 @@ func bootstrap(ctx context.Context) (context.Context, *infraDeps, error) {
 		agent.Use(guardrails.CostBudget(flags.costBudget))
 	}
 
+	// builder creates a fresh agent for each orchestration step using the
+	// detected provider and API key.  Each call returns a new agent with an
+	// empty conversation buffer so steps do not bleed state.
+	builder := func(preset agents.Preset) *core.Agent {
+		var stepClient llm.LLMClient
+		switch provider {
+		case providerOpenAI:
+			stepClient = llm.NewOpenAIClient(llm.OpenAIConfig{APIKey: apiKey})
+		default:
+			stepClient = llm.NewAnthropicClient(llm.AnthropicConfig{APIKey: apiKey})
+		}
+		presetModel := agents.ModelForTier(provider, preset.RecommendedTier)
+		a := core.NewAgent(core.AgentConfig{
+			Model:     presetModel,
+			System:    preset.System,
+			MaxSteps:  preset.MaxSteps,
+			MaxTokens: preset.MaxTokens,
+		}, stepClient, buildRegistry(), core.NewConversationBuffer(flags.tokenBudget))
+		a.Use(
+			guardrails.MaxSteps(preset.MaxSteps),
+			guardrails.TokenBudget(flags.tokenBudget),
+			guardrails.LoopDetection(5),
+		)
+		if flags.costBudget > 0 {
+			a.Use(guardrails.CostBudget(flags.costBudget))
+		}
+		return a
+	}
+
 	deps := &infraDeps{
 		logger:   logger,
 		ledger:   ledger,
 		agent:    agent,
 		agentID:  agent.ID(),
 		provider: provider,
+		builder:  builder,
 		cleanup:  cleanup,
 	}
 	return ctx, deps, nil
