@@ -17,7 +17,7 @@ var askCmd = &cobra.Command{
 If no message is provided, reads from stdin (pipe-friendly).
 
 Examples:
-  goagent ask "What is the current date?"
+  goagent ask "What is the capital of France?"
   echo "Summarise this file" | goagent ask`,
 	SilenceUsage: true,
 	RunE:         runAsk,
@@ -40,7 +40,6 @@ func runAsk(cmd *cobra.Command, args []string) error {
 	if len(args) > 0 {
 		message = strings.Join(args, " ")
 	} else {
-		// Read from stdin.
 		var sb strings.Builder
 		scanner := bufio.NewScanner(os.Stdin)
 		for scanner.Scan() {
@@ -58,15 +57,18 @@ func runAsk(cmd *cobra.Command, args []string) error {
 	}
 
 	result, runErr := deps.agent.RunStreaming(ctx, message, os.Stdout)
+	fmt.Fprintln(os.Stdout) // trailing newline after streamed text
+
 	if runErr != nil {
 		deps.logger.WarnContext(ctx, "agent.run.error", slog.String("error", runErr.Error()))
-		fmt.Fprintf(os.Stderr, "\n[error] %v\n", runErr)
+		fmt.Fprintf(os.Stderr, "Error: %v\n", runErr)
 		return runErr
 	}
 
-	fmt.Printf("\n\n[steps: %d | cost: $%.6f | %s]\n",
-		result.Steps, result.Cost, result.Duration.Round(1000000))
+	if flags.verbose {
+		fmt.Fprintf(os.Stderr, "[%d step(s) · $%.6f · %s]\n",
+			result.Steps, result.Cost, result.Duration.Round(1_000_000))
+	}
 
-	printSummary(deps.ledger)
 	return nil
 }

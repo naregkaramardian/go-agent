@@ -13,10 +13,8 @@ import (
 )
 
 var runCmd = &cobra.Command{
-	Use:   "run",
-	Short: "Start an interactive multi-turn REPL session with the agent",
-	Long: `Opens an interactive prompt where each input is sent to the agent.
-The conversation history is preserved across turns. Press Ctrl+D (EOF) to exit.`,
+	Use:          "run",
+	Short:        "Start an interactive chat session with the agent",
 	SilenceUsage: true,
 	RunE:         runREPL,
 }
@@ -30,38 +28,36 @@ func runREPL(cmd *cobra.Command, _ []string) error {
 	defer deps.cleanup()
 
 	if deps.agent == nil {
-		deps.logger.WarnContext(ctx, "no API key found — exiting")
 		fmt.Fprintln(os.Stderr, "Error: no API key found. Set ANTHROPIC_API_KEY or OPENAI_API_KEY.")
 		fmt.Fprintln(os.Stderr, "Use --provider to specify which one to use.")
 		return fmt.Errorf("no API key found")
 	}
 
-	// Start a trace for the entire REPL session.
 	ctx, span := otel.Tracer("go-agent").Start(ctx, "cli.run.session",
 		trace.WithAttributes(),
 	)
 	defer span.End()
 
-	sc := span.SpanContext()
 	model, _, _, _ := resolveAgentConfig(deps.provider)
-	agentTypeLabel := flags.agentType
-	if agentTypeLabel == "" {
-		agentTypeLabel = "custom"
+	agentLabel := flags.agentType
+	if agentLabel == "" {
+		agentLabel = model
 	}
-	fmt.Printf("goagent interactive session\n")
-	fmt.Printf("  Agent ID   : %s\n", deps.agentID)
-	fmt.Printf("  Trace ID   : %s\n", sc.TraceID().String())
-	fmt.Printf("  Provider   : %s\n", deps.provider)
-	fmt.Printf("  Model      : %s\n", model)
-	fmt.Printf("  Agent type : %s\n", agentTypeLabel)
-	fmt.Printf("  Metrics  : http://localhost%s/metrics\n", flags.metricsAddr)
-	fmt.Println()
-	fmt.Println("Type your message and press Enter. Ctrl+D to exit.")
-	fmt.Println(strings.Repeat("─", 60))
 
+	// ── Header ────────────────────────────────────────────────────────────────
+	fmt.Fprintf(os.Stdout, "goagent · %s · %s\n", agentLabel, deps.provider)
+	fmt.Fprintln(os.Stdout, "Ctrl+D or /exit to quit")
+	fmt.Fprintln(os.Stdout, strings.Repeat("─", 50))
+	fmt.Fprintln(os.Stdout)
+
+	if flags.logFile != "" {
+		fmt.Fprintf(os.Stdout, "  logs → %s\n\n", flags.logFile)
+	}
+
+	// ── Conversation loop ──────────────────────────────────────────────────────
 	scanner := bufio.NewScanner(os.Stdin)
 	for {
-		fmt.Print("\nYou: ")
+		fmt.Fprint(os.Stdout, "You: ")
 		if !scanner.Scan() {
 			break
 		}
@@ -69,22 +65,33 @@ func runREPL(cmd *cobra.Command, _ []string) error {
 		if line == "" {
 			continue
 		}
+		if line == "/exit" || line == "/quit" {
+			break
+		}
 
-		fmt.Print("\nAgent: ")
+		fmt.Fprint(os.Stdout, "\nAgent: ")
 		result, runErr := deps.agent.RunStreaming(ctx, line, os.Stdout)
+		fmt.Fprintln(os.Stdout)
+		fmt.Fprintln(os.Stdout)
+
 		if runErr != nil {
 			deps.logger.WarnContext(ctx, "agent.run.error", slog.String("error", runErr.Error()))
-			fmt.Fprintf(os.Stderr, "\n[error] %v\n", runErr)
+			fmt.Fprintf(os.Stderr, "Error: %v\n\n", runErr)
 			continue
 		}
-		fmt.Printf("\n\n[steps: %d | cost: $%.6f | %s]\n",
-			result.Steps, result.Cost, result.Duration.Round(1000000))
+
+		if flags.verbose {
+			fmt.Fprintf(os.Stdout, "  [%d step(s) · $%.6f · %s]\n\n",
+				result.Steps, result.Cost, result.Duration.Round(1_000_000))
+		}
 	}
 
 	if scanErr := scanner.Err(); scanErr != nil {
 		deps.logger.WarnContext(ctx, "cli.run.scanner.error", slog.String("error", scanErr.Error()))
 	}
 
+	// ── Exit summary ──────────────────────────────────────────────────────────
+	fmt.Fprintln(os.Stdout, strings.Repeat("─", 50))
 	printSummary(deps.ledger)
 	return nil
 }

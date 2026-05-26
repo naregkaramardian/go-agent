@@ -2,6 +2,7 @@ package observability
 
 import (
 	"context"
+	"io"
 	"log/slog"
 	"os"
 	"strings"
@@ -11,12 +12,20 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// NewLogger returns a configured slog.Logger.
-// env="production" → JSON handler on stdout; anything else → coloured tint handler on stderr.
-func NewLogger(env string) *slog.Logger {
+// NewLogger returns a logger that writes to stderr.
+// format="json" → structured JSON; anything else → coloured tint.
+// Convenience wrapper around NewLoggerTo; use that when you need a custom writer.
+func NewLogger(format string) *slog.Logger {
+	return NewLoggerTo(format, os.Stderr)
+}
+
+// NewLoggerTo returns a logger that writes to w.
+// format="json" → structured JSON; anything else → coloured tint.
+// Pass io.Discard to silence all logging.
+func NewLoggerTo(format string, w io.Writer) *slog.Logger {
 	var handler slog.Handler
-	if strings.EqualFold(env, "production") {
-		handler = slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+	if strings.EqualFold(format, "json") {
+		handler = slog.NewJSONHandler(w, &slog.HandlerOptions{
 			Level: slog.LevelDebug,
 			ReplaceAttr: func(_ []string, a slog.Attr) slog.Attr {
 				if a.Key == slog.TimeKey {
@@ -26,7 +35,7 @@ func NewLogger(env string) *slog.Logger {
 			},
 		})
 	} else {
-		handler = tint.NewHandler(os.Stderr, &tint.Options{
+		handler = tint.NewHandler(w, &tint.Options{
 			Level:      slog.LevelDebug,
 			TimeFormat: time.TimeOnly,
 		})

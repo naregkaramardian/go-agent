@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"time"
@@ -37,8 +38,10 @@ func defaultModel(provider string) string {
 }
 
 type globalFlags struct {
-	envFile      string // path to .env file; "" = auto-detect
-	logFormat    string
+	envFile      string // path to .env file; "" = disabled
+	logFormat    string // "text" | "json"
+	logFile      string // write logs here; "" = discard (unless --verbose)
+	verbose      bool   // write logs to stderr
 	metricsAddr  string
 	otlpEndpoint string
 	provider     string // "anthropic" | "openai" | "" (auto-detect)
@@ -68,8 +71,10 @@ Provider auto-detection (checked in order):
 
 func init() {
 	f := rootCmd.PersistentFlags()
-	f.StringVar(&flags.envFile, "env-file", ".env", "Path to .env file (set to empty string to disable)")
+	f.StringVar(&flags.envFile, "env-file", ".env", "Path to .env file (empty string disables it)")
 	f.StringVar(&flags.logFormat, "log-format", "text", "Log format: text|json")
+	f.StringVar(&flags.logFile, "log-file", "", "Write logs to this file (default: discard)")
+	f.BoolVarP(&flags.verbose, "verbose", "v", false, "Print logs to stderr (overrides --log-file for stderr output)")
 	f.StringVar(&flags.metricsAddr, "metrics-addr", ":9090", "Address for Prometheus /metrics endpoint")
 	f.StringVar(&flags.otlpEndpoint, "otlp-endpoint", "", "OTLP collector endpoint (empty = stdout exporter in dev)")
 	f.StringVar(&flags.provider, "provider", "", "LLM provider: anthropic|openai (default: auto-detect from env)")
@@ -113,7 +118,8 @@ func bootstrap(ctx context.Context) (context.Context, *infraDeps, error) {
 		flags.logFormat = envFmt
 	}
 
-	logger := observability.NewLogger(flags.logFormat)
+	logWriter, logCloser := resolveLogWriter()
+	logger := observability.NewLoggerTo(flags.logFormat, logWriter)
 	slog.SetDefault(logger)
 	ctx = observability.WithLogger(ctx, logger)
 
@@ -121,7 +127,13 @@ func bootstrap(ctx context.Context) (context.Context, *infraDeps, error) {
 		os.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", flags.otlpEndpoint)
 	}
 
-	shutdown, err := observability.InitTracer(ctx, serviceName, version)
+	// In verbose mode, write spans to stderr alongside logs.
+	// Otherwise InitTracer uses a no-op exporter (no output).
+	var spanWriter io.Writer
+	if flags.verbose {
+		spanWriter = os.Stderr
+	}
+	shutdown, err := observability.InitTracer(ctx, serviceName, version, spanWriter)
 	if err != nil {
 		return ctx, nil, fmt.Errorf("cli.bootstrap: tracer: %w", err)
 	}
@@ -138,6 +150,7 @@ func bootstrap(ctx context.Context) (context.Context, *infraDeps, error) {
 		if shutErr := shutdown(shutCtx); shutErr != nil {
 			logger.Error("tracer.shutdown", slog.String("error", shutErr.Error()))
 		}
+		logCloser()
 	}
 
 	provider, apiKey, err := resolveProvider()
@@ -159,7 +172,7 @@ func bootstrap(ctx context.Context) (context.Context, *infraDeps, error) {
 		client = llm.NewAnthropicClient(llm.AnthropicConfig{APIKey: apiKey})
 	}
 
-	logger.InfoContext(ctx, "provider.selected",
+	logger.DebugContext(ctx, "provider.selected",
 		slog.String("provider", provider),
 		slog.String("model", model),
 		slog.String("agent_type", flags.agentType),
@@ -278,6 +291,28 @@ func buildRegistry() *tools.Registry {
 		reg.Register(fw)
 	}
 	return reg
+}
+
+// resolveLogWriter returns the io.Writer logs should be written to, plus a
+// closer that must be called when the program exits.
+//
+// Priority:
+//   --verbose          → stderr  (developer mode, no file)
+//   --log-file PATH    → PATH    (operator mode)
+//   neither            → io.Discard (clean interactive UI, default)
+func resolveLogWriter() (io.Writer, func()) {
+	if flags.verbose {
+		return os.Stderr, func() {}
+	}
+	if flags.logFile != "" {
+		f, err := os.OpenFile(flags.logFile, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "warning: cannot open log file %s: %v — logs discarded\n", flags.logFile, err)
+			return io.Discard, func() {}
+		}
+		return f, func() { _ = f.Close() }
+	}
+	return io.Discard, func() {}
 }
 
 // loadEnvFile loads variables from path into the process environment.

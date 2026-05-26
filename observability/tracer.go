@@ -3,6 +3,7 @@ package observability
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 
 	"go.opentelemetry.io/otel"
@@ -16,10 +17,14 @@ import (
 )
 
 // InitTracer configures the global OTel TracerProvider.
-// When OTEL_EXPORTER_OTLP_ENDPOINT is set it uses an OTLP HTTP exporter;
-// otherwise it writes spans to stdout (dev mode).
+//
+// Exporter selection (first match wins):
+//   OTEL_EXPORTER_OTLP_ENDPOINT set → OTLP HTTP exporter (production)
+//   spanWriter != nil              → stdout exporter writing to spanWriter (dev/verbose)
+//   neither                        → no-op exporter (default; keeps the CLI clean)
+//
 // The caller must invoke the returned shutdown function before process exit.
-func InitTracer(ctx context.Context, serviceName, version string) (func(context.Context) error, error) {
+func InitTracer(ctx context.Context, serviceName, version string, spanWriter ...io.Writer) (func(context.Context) error, error) {
 	res, err := resource.New(ctx,
 		resource.WithAttributes(
 			semconv.ServiceName(serviceName),
@@ -39,11 +44,17 @@ func InitTracer(ctx context.Context, serviceName, version string) (func(context.
 		if err != nil {
 			return nil, fmt.Errorf("observability.InitTracer: OTLP exporter: %w", err)
 		}
-	} else {
-		exporter, err = stdouttrace.New(stdouttrace.WithPrettyPrint())
+	} else if len(spanWriter) > 0 && spanWriter[0] != nil {
+		exporter, err = stdouttrace.New(
+			stdouttrace.WithWriter(spanWriter[0]),
+			stdouttrace.WithPrettyPrint(),
+		)
 		if err != nil {
 			return nil, fmt.Errorf("observability.InitTracer: stdout exporter: %w", err)
 		}
+	} else {
+		// No destination configured — discard all spans silently.
+		exporter = noopExporter{}
 	}
 
 	tp := sdktrace.NewTracerProvider(
@@ -59,3 +70,9 @@ func InitTracer(ctx context.Context, serviceName, version string) (func(context.
 func StartSpan(ctx context.Context, name string, attrs ...attribute.KeyValue) (context.Context, trace.Span) {
 	return otel.Tracer("go-agent").Start(ctx, name, trace.WithAttributes(attrs...))
 }
+
+// noopExporter silently discards all spans.
+type noopExporter struct{}
+
+func (noopExporter) ExportSpans(_ context.Context, _ []sdktrace.ReadOnlySpan) error { return nil }
+func (noopExporter) Shutdown(_ context.Context) error                                { return nil }

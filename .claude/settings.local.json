@@ -9,7 +9,10 @@
       "Bash(go vet *)",
       "Bash(OPENAI_API_KEY=\"\" ANTHROPIC_API_KEY=\"\" go run . run)",
       "Bash(ANTHROPIC_API_KEY=\"\" OPENAI_API_KEY=\"\" go run . ask \"hello\")",
-      "Bash(ANTHROPIC_API_KEY=\"\" OPENAI_API_KEY=\"\" go run . --env-file /tmp/test.env run --help)"
+      "Bash(ANTHROPIC_API_KEY=\"\" OPENAI_API_KEY=\"\" go run . --env-file /tmp/test.env run --help)",
+      "Bash(ANTHROPIC_API_KEY=\"\" OPENAI_API_KEY=\"\" go run . run)",
+      "Bash(ANTHROPIC_API_KEY=\"\" OPENAI_API_KEY=\"sk-fake\" go run *)",
+      "Bash(echo \"exit: $?\")"
     ]
   }
 }
