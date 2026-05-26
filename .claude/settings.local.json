@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(go test *)",
-      "Skill(build-go-agent)"
+      "Skill(build-go-agent)",
+      "Bash(go run *)"
     ]
   }
 }

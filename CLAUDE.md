@@ -496,7 +496,7 @@ passing required after setup.
 [ ] Long-term memory with vector store
 [x] Basic agent loop (plan/act/observe)
 [x] Built-in tools (bash, file read/write, HTTP)
-[ ] CLI harness for interactive testing
+[x] CLI harness for interactive testing
 [x] observability/logger.go — slog setup + traceHandler wrapper
 [x] observability/tracer.go — OpenTelemetry provider + OTLP exporter
 [x] observability/metrics.go — Prometheus metrics registry
@@ -504,7 +504,7 @@ passing required after setup.
 [x] observability/middleware.go — ObserveTool + ObserveLLM wrappers
 [x] /metrics HTTP endpoint (Prometheus scrape target)
 [x] Trace context auto-propagated through all goroutines
-[ ] Cost budget guardrail wired to CostLedger
+[x] Cost budget guardrail wired to CostLedger
 
 ## Design Notes
 - **memory.Buffer vs ConversationBuffer**: `memory.Buffer` (in `memory/buffer.go`) implements the
@@ -525,3 +525,14 @@ passing required after setup.
 - **Module**: `github.com/nareg/goagent`, Go 1.25+ (required by OTel v1.43.0)
 - **OTLP transport**: HTTP exporter (`otlptracehttp`) used instead of gRPC to avoid managing
   `grpc.DialOption`/credentials boilerplate; `OTEL_EXPORTER_OTLP_ENDPOINT` activates it.
+- **CLI harness**: `cli/` package (Cobra) with `run` (interactive REPL) and `ask` (one-shot) subcommands.
+  `main.go` is now a 4-line entry point that calls `cli.Execute()`. All flags are global (persistent)
+  on the root command. See `go run . --help` for the full flag reference.
+- **RunStreaming vs Run**: `Agent.RunStreaming(ctx, msg, out io.Writer)` uses `llm.Stream()` instead of
+  `llm.Complete()` for each planning call so text deltas are written to `out` as they arrive. The
+  guardrail chain, tool execution, and context management are identical to `Run()`. Observability for
+  streaming is done inline in the streaming base handler (`llm.stream.complete` log event, same metrics).
+- **Double-ObserveLLM fixed**: `NewAnthropicClient` already prepends `ObserveLLM()` internally.
+  Do NOT pass `llm.ObserveLLM()` as an extra middleware — it would double-count metrics and costs.
+- **Cobra added**: `github.com/spf13/cobra v1.10.2` added to go.mod. Viper is not yet included
+  (flags are wired via pflag directly, which is sufficient for the current flag set).

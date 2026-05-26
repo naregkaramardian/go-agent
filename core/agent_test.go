@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -35,7 +36,30 @@ func (s *stubLLMClient) Complete(_ context.Context, _ *llm.CompletionRequest) (*
 }
 
 func (s *stubLLMClient) Stream(_ context.Context, _ *llm.CompletionRequest) (<-chan llm.StreamChunk, error) {
-	ch := make(chan llm.StreamChunk)
+	if s.err != nil {
+		ch := make(chan llm.StreamChunk, 1)
+		ch <- llm.StreamChunk{Err: s.err}
+		close(ch)
+		return ch, nil
+	}
+	var resp *llm.CompletionResponse
+	if s.idx < len(s.responses) {
+		resp = s.responses[s.idx]
+		s.idx++
+	} else {
+		resp = &llm.CompletionResponse{Content: "done", StopReason: llm.StopReasonEndTurn}
+	}
+	ch := make(chan llm.StreamChunk, 8)
+	if resp.Content != "" {
+		ch <- llm.StreamChunk{TextDelta: resp.Content}
+	}
+	for i, tc := range resp.ToolCalls {
+		ch <- llm.StreamChunk{ToolCallDelta: &llm.ToolCallDelta{Index: i, ID: tc.ID, Name: tc.Name}}
+		if len(tc.Input) > 0 {
+			ch <- llm.StreamChunk{ToolCallDelta: &llm.ToolCallDelta{Index: i, InputDelta: string(tc.Input)}}
+		}
+	}
+	ch <- llm.StreamChunk{Usage: &llm.Usage{InputTokens: 10, OutputTokens: 5}}
 	close(ch)
 	return ch, nil
 }
@@ -176,6 +200,68 @@ func TestAgent_run_toolError_doesNotHaltLoop(t *testing.T) {
 	result, err := agent.Run(ctx, "use broken tool")
 	require.NoError(t, err)
 	assert.Equal(t, "handled the error", result.Output)
+}
+
+func TestAgent_runStreaming_terminalOnFirstResponse(t *testing.T) {
+	client := &stubLLMClient{
+		responses: []*llm.CompletionResponse{
+			{Content: "streaming reply", StopReason: llm.StopReasonEndTurn},
+		},
+	}
+	reg := tools.NewRegistry()
+	agent := newTestAgent(client, reg)
+
+	ctx := observability.WithLogger(context.Background(), observability.NewLogger("dev"))
+	ctx = observability.WithCostLedger(ctx, observability.NewCostLedger())
+
+	var out strings.Builder
+	result, err := agent.RunStreaming(ctx, "hi", &out)
+	require.NoError(t, err)
+	assert.Equal(t, "streaming reply", result.Output)
+	assert.Equal(t, "streaming reply", out.String())
+	assert.Equal(t, 1, result.Steps)
+}
+
+func TestAgent_runStreaming_toolCallThenTerminal(t *testing.T) {
+	toolOutput := json.RawMessage(`{"result":"ok"}`)
+	client := &stubLLMClient{
+		responses: []*llm.CompletionResponse{
+			{
+				ToolCalls:  []llm.ToolCall{{ID: "c1", Name: "calc", Input: json.RawMessage(`{}`)}},
+				StopReason: llm.StopReasonToolUse,
+			},
+			{Content: "tool done", StopReason: llm.StopReasonEndTurn},
+		},
+	}
+	reg := tools.NewRegistry()
+	reg.Register(&stubTool{name: "calc", output: toolOutput})
+	agent := newTestAgent(client, reg)
+
+	ctx := observability.WithLogger(context.Background(), observability.NewLogger("dev"))
+	ctx = observability.WithCostLedger(ctx, observability.NewCostLedger())
+
+	var out strings.Builder
+	result, err := agent.RunStreaming(ctx, "calc something", &out)
+	require.NoError(t, err)
+	assert.Equal(t, "tool done", result.Output)
+	assert.Equal(t, 2, result.Steps)
+}
+
+func TestAgent_runStreaming_writesToNilWriter(t *testing.T) {
+	client := &stubLLMClient{
+		responses: []*llm.CompletionResponse{
+			{Content: "silent reply", StopReason: llm.StopReasonEndTurn},
+		},
+	}
+	reg := tools.NewRegistry()
+	agent := newTestAgent(client, reg)
+
+	ctx := observability.WithLogger(context.Background(), observability.NewLogger("dev"))
+	ctx = observability.WithCostLedger(ctx, observability.NewCostLedger())
+
+	result, err := agent.RunStreaming(ctx, "hi", nil)
+	require.NoError(t, err)
+	assert.Equal(t, "silent reply", result.Output)
 }
 
 func TestNewAgent_defaultsAgentIDAndMaxSteps(t *testing.T) {
