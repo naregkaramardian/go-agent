@@ -141,10 +141,11 @@ var (
 	}, []string{"workflow", "step"})
 )
 
-// ServeMetrics starts the Prometheus /metrics HTTP endpoint on addr (e.g. ":9090").
-// Runs in a background goroutine; does not block.
+// ServeMetrics starts the Prometheus /metrics endpoint and live /dashboard
+// on addr (e.g. ":9090"). Runs in a background goroutine; does not block.
 func ServeMetrics(addr string) {
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.Handler())
+	registerDashboard(mux)
 	go http.ListenAndServe(addr, mux) //nolint:errcheck
 }
