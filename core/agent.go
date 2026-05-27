@@ -19,6 +19,7 @@ import (
 
 	"github.com/nareg/goagent/guardrails"
 	"github.com/nareg/goagent/llm"
+	"github.com/nareg/goagent/memory"
 	"github.com/nareg/goagent/observability"
 	"github.com/nareg/goagent/tools"
 )
@@ -28,8 +29,9 @@ type AgentConfig struct {
 	AgentID   string // auto-generated if empty
 	Model     string
 	System    string
-	MaxSteps  int // 0 = unlimited (not recommended)
-	MaxTokens int // max tokens per LLM call; 0 = provider default
+	MaxSteps  int           // 0 = unlimited (not recommended)
+	MaxTokens int           // max tokens per LLM call; 0 = provider default
+	Memory    memory.Memory // optional long-term store; nil = disabled
 }
 
 // RunResult summarises a completed agent run.
@@ -93,7 +95,7 @@ func (a *Agent) Run(ctx context.Context, userMsg string) (*RunResult, error) {
 	)
 	observability.AgentRunsTotal.WithLabelValues("started").Inc()
 
-	a.buffer.Add(ctx, llm.Message{Role: llm.RoleUser, Content: userMsg})
+	a.buffer.Add(ctx, llm.Message{Role: llm.RoleUser, Content: recallEnrich(ctx, a.cfg.Memory, userMsg)})
 
 	var (
 		steps  int
@@ -155,6 +157,7 @@ func (a *Agent) Run(ctx context.Context, userMsg string) (*RunResult, error) {
 	if runErr != nil {
 		return nil, runErr
 	}
+	storeMemory(ctx, a.cfg.Memory, userMsg, output)
 	return &RunResult{Output: output, Steps: steps, Cost: totalCost, Duration: dur}, nil
 }
 
@@ -304,7 +307,7 @@ func (a *Agent) RunStreaming(ctx context.Context, userMsg string, out io.Writer)
 	)
 	observability.AgentRunsTotal.WithLabelValues("started").Inc()
 
-	a.buffer.Add(ctx, llm.Message{Role: llm.RoleUser, Content: userMsg})
+	a.buffer.Add(ctx, llm.Message{Role: llm.RoleUser, Content: recallEnrich(ctx, a.cfg.Memory, userMsg)})
 
 	var (
 		steps  int
@@ -366,6 +369,7 @@ func (a *Agent) RunStreaming(ctx context.Context, userMsg string, out io.Writer)
 	if runErr != nil {
 		return nil, runErr
 	}
+	storeMemory(ctx, a.cfg.Memory, userMsg, output)
 	return &RunResult{Output: output, Steps: steps, Cost: totalCost, Duration: dur}, nil
 }
 
@@ -579,3 +583,37 @@ func drainStream(ch <-chan llm.StreamChunk, out io.Writer) (*llm.CompletionRespo
 
 // errTerminal is used internally; kept unexported.
 var errTerminal = errors.New("terminal")
+
+// recallEnrich prepends relevant long-term memories to msg so the model has
+// context from past sessions. Returns msg unchanged when mem is nil or empty.
+func recallEnrich(ctx context.Context, mem memory.Memory, msg string) string {
+	if mem == nil {
+		return msg
+	}
+	entries, err := mem.Recall(ctx, msg, 5)
+	if err != nil || len(entries) == 0 {
+		return msg
+	}
+	var b strings.Builder
+	b.WriteString("## Relevant memories from previous sessions\n")
+	for _, e := range entries {
+		fmt.Fprintf(&b, "- %s\n", e.Content)
+	}
+	b.WriteString("\n## Current request\n")
+	b.WriteString(msg)
+	return b.String()
+}
+
+// storeMemory saves the user/assistant exchange as a memory entry.
+// Best-effort: errors are silently dropped to avoid breaking the agent run.
+func storeMemory(ctx context.Context, mem memory.Memory, userMsg, output string) {
+	if mem == nil || output == "" {
+		return
+	}
+	_ = mem.Store(ctx, memory.MemoryEntry{
+		Content: fmt.Sprintf("User: %s\nAssistant: %s",
+			observability.Truncate(userMsg, 300),
+			observability.Truncate(output, 500)),
+		Tags: []string{"session"},
+	})
+}

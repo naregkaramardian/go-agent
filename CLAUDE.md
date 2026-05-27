@@ -493,7 +493,7 @@ passing required after setup.
 [x] Conversation context manager with token tracking
 [x] Guardrails middleware chain
 [x] Short-term memory buffer
-[ ] Long-term memory with vector store
+[x] Long-term memory with vector store
 [x] Basic agent loop (plan/act/observe)
 [x] Built-in tools (bash, file read/write, HTTP)
 [x] CLI harness for interactive testing

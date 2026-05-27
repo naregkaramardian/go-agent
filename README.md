@@ -14,6 +14,7 @@ Tool use, memory, guardrails, multi-agent orchestration, and full observability 
   - [Pipe input from stdin](#pipe-input-from-stdin)
 - [Agent presets](#agent-presets)
 - [Multi-agent workflows](#multi-agent-workflows)
+- [Long-term memory (pgvector)](#long-term-memory-pgvector)
 - [All flags](#all-flags)
 - [Observability](#observability)
 - [Architecture](#architecture)
@@ -187,6 +188,88 @@ cat spec.md | go run . orchestrate run --workflow feature-build
 
 ---
 
+## Long-term memory (pgvector)
+
+By default the agent has no memory between sessions. Enabling long-term memory connects the agent to a PostgreSQL database with the [pgvector](https://github.com/pgvector/pgvector) extension, which stores conversation history as semantic embeddings and recalls the most relevant past exchanges before each new request.
+
+**How it works at runtime:**
+1. When you send a message, the agent embeds it and queries pgvector for the top-5 most similar past interactions.
+2. Matching memories are prepended to your message so the model has context from previous sessions.
+3. After the run completes, the exchange is stored as a new memory entry.
+
+Embeddings use OpenAI's `text-embedding-3-small` model (1536 dims). An `OPENAI_API_KEY` is required for embeddings even if you use Anthropic for chat.
+
+### 1. Start the database
+
+A `docker-compose.yml` is included at the project root:
+
+```bash
+docker compose up -d
+```
+
+This starts `pgvector/pgvector:pg16` on `localhost:5432` with:
+- Database: `goagent`
+- User: `goagent`
+- Password: `goagent`
+
+The `goagent_memories` table and HNSW index are created automatically on first connect — no manual migration needed.
+
+### 2. Configure the connection
+
+Add to your `.env`:
+
+```dotenv
+MEMORY_DSN=postgres://goagent:goagent@localhost:5432/goagent
+OPENAI_API_KEY=sk-...    # used for both chat completions and embeddings
+```
+
+Or pass it as a flag:
+
+```bash
+go run . run --memory-dsn "postgres://goagent:goagent@localhost:5432/goagent"
+```
+
+If you use Anthropic for chat but need embeddings, set a separate embed key:
+
+```bash
+go run . run \
+  --provider anthropic \
+  --memory-dsn "postgres://goagent:goagent@localhost:5432/goagent" \
+  --embed-key "sk-..."    # OpenAI key for embeddings only
+```
+
+### 3. Run with memory enabled
+
+```bash
+# Interactive REPL with persistent memory
+go run . run --memory-dsn "postgres://goagent:goagent@localhost:5432/goagent"
+
+# Single question with memory context
+go run . ask --memory-dsn "postgres://goagent:goagent@localhost:5432/goagent" "What did we discuss last time?"
+```
+
+### 4. Run integration tests
+
+Integration tests are skipped unless `MEMORY_DSN` is set:
+
+```bash
+docker compose up -d
+MEMORY_DSN=postgres://goagent:goagent@localhost:5432/goagent go test ./memory/...
+```
+
+### Stopping and resetting
+
+```bash
+# Stop without losing data
+docker compose stop
+
+# Wipe all stored memories and start fresh
+docker compose down -v
+docker compose up -d
+```
+
+---
+
 ## All flags
 
 All flags are global and work with every command.
@@ -194,11 +277,13 @@ All flags are global and work with every command.
 ```
 --agent-type string      Agent preset ID (overrides --model, --system, --max-steps, --max-tokens)
 --cost-budget float      USD cost limit per run; 0 = unlimited (default: 1.00)
+--embed-key string       OpenAI API key for embeddings (defaults to OPENAI_API_KEY)
 --env-file string        Path to .env file; empty string disables loading (default: ".env")
 --log-file string        Write logs to this file; default is discard (no log output)
 --log-format string      "text" (coloured) or "json" (structured) (default: "text")
 --max-steps int          Max agent loop iterations per run (default: 20)
 --max-tokens int         Max tokens per LLM response (default: 2048)
+--memory-dsn string      PostgreSQL DSN for pgvector long-term memory (default: disabled)
 --metrics-addr string    Address for Prometheus /metrics endpoint (default: ":9090")
 --model string           Override the model ID (default: claude-haiku-4-5 or gpt-4o-mini)
 --otlp-endpoint string   OTLP collector endpoint; empty = no-op exporter

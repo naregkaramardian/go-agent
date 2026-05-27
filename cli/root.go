@@ -16,6 +16,7 @@ import (
 	"github.com/nareg/goagent/core"
 	"github.com/nareg/goagent/guardrails"
 	"github.com/nareg/goagent/llm"
+	"github.com/nareg/goagent/memory"
 	"github.com/nareg/goagent/observability"
 	"github.com/nareg/goagent/tools"
 	"github.com/nareg/goagent/tools/builtin"
@@ -52,6 +53,8 @@ type globalFlags struct {
 	maxTokens    int
 	costBudget   float64
 	tokenBudget  int
+	memoryDSN    string // postgres DSN for pgvector long-term memory; "" = disabled
+	embedKey     string // OpenAI API key for embeddings; defaults to OPENAI_API_KEY
 }
 
 var flags globalFlags
@@ -85,6 +88,8 @@ func init() {
 	f.IntVar(&flags.maxTokens, "max-tokens", 2048, "Max tokens per LLM response")
 	f.Float64Var(&flags.costBudget, "cost-budget", 1.0, "USD cost budget per run (0 = unlimited)")
 	f.IntVar(&flags.tokenBudget, "token-budget", 100_000, "Token budget for conversation context")
+	f.StringVar(&flags.memoryDSN, "memory-dsn", "", "PostgreSQL DSN for pgvector long-term memory (e.g. postgres://goagent:goagent@localhost:5432/goagent)")
+	f.StringVar(&flags.embedKey, "embed-key", "", "OpenAI API key for embeddings (defaults to OPENAI_API_KEY env var)")
 
 	rootCmd.AddCommand(runCmd)
 	rootCmd.AddCommand(askCmd)
@@ -106,6 +111,7 @@ type infraDeps struct {
 	agentID  string
 	provider string
 	builder  func(agents.Preset) *core.Agent
+	mem      *memory.PgVectorMemory // nil when --memory-dsn is not set
 	cleanup  func()
 }
 
@@ -180,12 +186,32 @@ func bootstrap(ctx context.Context) (context.Context, *infraDeps, error) {
 		slog.String("agent_type", flags.agentType),
 	)
 
+	// Wire long-term memory when a DSN is provided.
+	var mem *memory.PgVectorMemory
+	if flags.memoryDSN != "" {
+		embedKey := flags.embedKey
+		if embedKey == "" {
+			embedKey = os.Getenv("OPENAI_API_KEY")
+		}
+		if embedKey == "" {
+			return ctx, nil, fmt.Errorf("--memory-dsn requires an OpenAI API key for embeddings (set --embed-key or OPENAI_API_KEY)")
+		}
+		embedder := memory.NewOpenAIEmbedder(embedKey)
+		var memErr error
+		mem, memErr = memory.NewPgVectorMemory(ctx, flags.memoryDSN, embedder, "default")
+		if memErr != nil {
+			return ctx, nil, fmt.Errorf("cli.bootstrap: memory: %w", memErr)
+		}
+		logger.InfoContext(ctx, "memory.pgvector.connected", slog.String("dsn_host", flags.memoryDSN))
+	}
+
 	buf := core.NewConversationBuffer(flags.tokenBudget)
 	agent := core.NewAgent(core.AgentConfig{
 		Model:     model,
 		System:    system,
 		MaxSteps:  maxSteps,
 		MaxTokens: maxTokens,
+		Memory:    mem,
 	}, client, buildRegistry(), buf)
 
 	agent.Use(
@@ -226,6 +252,15 @@ func bootstrap(ctx context.Context) (context.Context, *infraDeps, error) {
 		return a
 	}
 
+	// Wrap cleanup to also close the memory pool.
+	baseCleanup := cleanup
+	cleanup = func() {
+		if mem != nil {
+			mem.Close()
+		}
+		baseCleanup()
+	}
+
 	deps := &infraDeps{
 		logger:   logger,
 		ledger:   ledger,
@@ -233,6 +268,7 @@ func bootstrap(ctx context.Context) (context.Context, *infraDeps, error) {
 		agentID:  agent.ID(),
 		provider: provider,
 		builder:  builder,
+		mem:      mem,
 		cleanup:  cleanup,
 	}
 	return ctx, deps, nil
