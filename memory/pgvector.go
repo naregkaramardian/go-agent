@@ -22,8 +22,6 @@ import (
 // pgvectorSchema creates the extension, table, and HNSW index if they don't
 // already exist. HNSW needs no pre-training and works well for small datasets.
 const pgvectorSchema = `
-CREATE EXTENSION IF NOT EXISTS vector;
-
 CREATE TABLE IF NOT EXISTS goagent_memories (
     id         TEXT        PRIMARY KEY,
     content    TEXT        NOT NULL,
@@ -54,6 +52,19 @@ type PgVectorMemory struct {
 //
 // dsn example: "postgres://goagent:goagent@localhost:5432/goagent"
 func NewPgVectorMemory(ctx context.Context, dsn string, embedder EmbeddingClient, agentID string) (*PgVectorMemory, error) {
+	// Create the extension before opening the pool. AfterConnect calls
+	// pgxvec.RegisterTypes which looks up the vector type in pg_type — that
+	// lookup fails if the extension doesn't exist yet.
+	setupConn, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		return nil, fmt.Errorf("memory.pgvector: setup connect: %w", err)
+	}
+	_, err = setupConn.Exec(ctx, "CREATE EXTENSION IF NOT EXISTS vector")
+	_ = setupConn.Close(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("memory.pgvector: create extension: %w", err)
+	}
+
 	cfg, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
 		return nil, fmt.Errorf("memory.pgvector: parse DSN: %w", err)

@@ -12,7 +12,9 @@
       "Bash(ANTHROPIC_API_KEY=\"\" OPENAI_API_KEY=\"\" go run . --env-file /tmp/test.env run --help)",
       "Bash(ANTHROPIC_API_KEY=\"\" OPENAI_API_KEY=\"\" go run . run)",
       "Bash(ANTHROPIC_API_KEY=\"\" OPENAI_API_KEY=\"sk-fake\" go run *)",
-      "Bash(echo \"exit: $?\")"
+      "Bash(echo \"exit: $?\")",
+      "Bash(docker build *)",
+      "Bash(make --version)"
     ]
   }
 }

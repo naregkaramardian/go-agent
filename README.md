@@ -8,6 +8,7 @@ Tool use, memory, guardrails, multi-agent orchestration, and full observability 
 
 - [Requirements](#requirements)
 - [Setup](#setup)
+- [Docker usage](#docker-usage)
 - [Running the agent](#running-the-agent)
   - [Interactive REPL](#interactive-repl)
   - [Single-turn ask](#single-turn-ask)
@@ -24,12 +25,53 @@ Tool use, memory, guardrails, multi-agent orchestration, and full observability 
 
 ## Requirements
 
-- Go 1.22+
-- An API key for **Anthropic** (`ANTHROPIC_API_KEY`) or **OpenAI** (`OPENAI_API_KEY`)
+Choose one:
+
+| | Docker (recommended) | Local Go |
+|---|---|---|
+| Runtime | Docker Desktop or Docker Engine | Go 1.22+ |
+| Database | Included in Compose | Docker or external Postgres |
+| API key | `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` | same |
 
 ---
 
 ## Setup
+
+### Option A — Docker (recommended, no Go install needed)
+
+**1. Clone the repo**
+
+```bash
+git clone <repo-url>
+cd go-agent
+```
+
+**2. Configure your API key**
+
+```bash
+cp .env.example .env
+```
+
+Open `.env` and fill in your key:
+
+```dotenv
+OPENAI_API_KEY=sk-...
+# or
+ANTHROPIC_API_KEY=sk-ant-...
+```
+
+**3. Start everything**
+
+```bash
+docker compose up -d postgres   # start the database in the background
+docker compose run --rm goagent # interactive REPL (builds image on first run)
+```
+
+That's it. The agent connects to pgvector automatically — no flags needed.
+
+---
+
+### Option B — Local Go
 
 **1. Clone and install dependencies**
 
@@ -43,14 +85,7 @@ go mod download
 
 ```bash
 cp .env.example .env
-```
-
-Open `.env` and fill in your key:
-
-```dotenv
-# Use one or both — Anthropic takes priority if both are set
-ANTHROPIC_API_KEY=sk-ant-...
-OPENAI_API_KEY=sk-...
+# fill in OPENAI_API_KEY or ANTHROPIC_API_KEY
 ```
 
 **3. (Optional) Build a binary**
@@ -58,6 +93,61 @@ OPENAI_API_KEY=sk-...
 ```bash
 go build -o goagent .
 # Then use ./goagent instead of go run . in the examples below
+```
+
+---
+
+## Docker usage
+
+A `Makefile` is provided so you never have to remember the full `docker compose` invocation.
+
+### One command to start everything
+
+```bash
+make run
+```
+
+This starts postgres in the background (if not already running), waits for it to be healthy, builds the image on first run, and drops you into the interactive REPL — all in one step.
+
+### All make targets
+
+| Command | What it does |
+|---|---|
+| `make run` | Start postgres + interactive REPL |
+| `make ask MSG="your question"` | Start postgres + single-turn ask |
+| `make orchestrate WORKFLOW=feature-build MSG="build X"` | Run a multi-agent workflow |
+| `make list` | List available workflows and presets |
+| `make build` | Rebuild the Docker image after code changes |
+| `make down` | Stop all services (data preserved) |
+| `make reset` | Stop all services and wipe all stored memories |
+| `make logs` | Tail postgres logs |
+| `make test` | Run the unit test suite locally |
+| `make test-integration` | Run pgvector integration tests against Docker postgres |
+
+### Raw Docker Compose equivalents
+
+If you prefer to skip `make`:
+
+```bash
+# Start postgres once, then run any command
+docker compose up -d postgres
+docker compose run --rm goagent run
+docker compose run --rm goagent ask "Explain Go interfaces"
+docker compose run --rm goagent orchestrate run --workflow feature-build "Build a JWT auth service"
+```
+
+**Rebuild after code changes**
+
+```bash
+docker compose build goagent
+# or
+make build
+```
+
+**Wipe all stored memories and start fresh**
+
+```bash
+make reset
 ```
 
 ---

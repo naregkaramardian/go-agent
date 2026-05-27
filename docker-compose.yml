@@ -15,5 +15,19 @@ services:
       timeout: 5s
       retries: 10
 
+  goagent:
+    build: .
+    image: goagent:latest
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      MEMORY_DSN: postgres://goagent:goagent@postgres:5432/goagent
+      LOG_FORMAT: ${LOG_FORMAT:-text}
+    stdin_open: true
+    tty: true
+
 volumes:
   pgdata:

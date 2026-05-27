@@ -126,6 +126,15 @@ func bootstrap(ctx context.Context) (context.Context, *infraDeps, error) {
 		flags.logFormat = envFmt
 	}
 
+	// Allow key settings to be provided via environment variables so Docker
+	// Compose and CI pipelines don't need to repeat them as CLI flags.
+	if flags.memoryDSN == "" {
+		flags.memoryDSN = os.Getenv("MEMORY_DSN")
+	}
+	if flags.embedKey == "" {
+		flags.embedKey = os.Getenv("EMBED_KEY")
+	}
+
 	logWriter, logCloser := resolveLogWriter()
 	logger := observability.NewLoggerTo(flags.logFormat, logWriter)
 	slog.SetDefault(logger)
