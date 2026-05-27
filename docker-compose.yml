@@ -21,6 +21,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    ports:
+      - "9090:9090"
     environment:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}

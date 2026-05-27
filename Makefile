@@ -5,17 +5,17 @@
 ## Start the agent (interactive REPL). Boots postgres first if not running.
 run:
 	docker compose up -d postgres
-	docker compose run --rm goagent run
+	docker compose run --rm --service-ports goagent run
 
 ## Ask a single question. Usage: make ask MSG="explain goroutines"
 ask:
 	docker compose up -d postgres
-	docker compose run --rm goagent ask "$(MSG)"
+	docker compose run --rm --service-ports goagent ask "$(MSG)"
 
 ## Run a multi-agent workflow. Usage: make orchestrate WORKFLOW=feature-build MSG="build a REST API"
 orchestrate:
 	docker compose up -d postgres
-	docker compose run --rm goagent orchestrate run --workflow $(WORKFLOW) "$(MSG)"
+	docker compose run --rm --service-ports goagent orchestrate run --workflow $(WORKFLOW) "$(MSG)"
 
 ## List available workflows and agent presets.
 list:
