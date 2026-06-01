@@ -55,6 +55,8 @@ type globalFlags struct {
 	tokenBudget  int
 	memoryDSN    string // postgres DSN for pgvector long-term memory; "" = disabled
 	embedKey     string // OpenAI API key for embeddings; defaults to OPENAI_API_KEY
+	apiAddr      string // address for the HTTP API server
+	apiKey       string // bearer token for HTTP API auth; read from API_KEY env if not set
 }
 
 var flags globalFlags
@@ -89,11 +91,14 @@ func init() {
 	f.Float64Var(&flags.costBudget, "cost-budget", 1.0, "USD cost budget per run (0 = unlimited)")
 	f.IntVar(&flags.tokenBudget, "token-budget", 100_000, "Token budget for conversation context")
 	f.StringVar(&flags.memoryDSN, "memory-dsn", "", "PostgreSQL DSN for pgvector long-term memory (e.g. postgres://goagent:goagent@localhost:5432/goagent)")
-	f.StringVar(&flags.embedKey, "embed-key", "", "OpenAI API key for embeddings (defaults to OPENAI_API_KEY env var)")
+	f.StringVar(&flags.embedKey, "embed-key", "", "OpenAI API key for embeddings (defaults to EMBED_KEY, then OPENAI_API_KEY env var)")
+	f.StringVar(&flags.apiAddr, "api-addr", ":8080", "Address for the HTTP API server (goagent server)")
+	f.StringVar(&flags.apiKey, "api-key", "", "Bearer token for HTTP API auth (env: API_KEY)")
 
 	rootCmd.AddCommand(runCmd)
 	rootCmd.AddCommand(askCmd)
 	rootCmd.AddCommand(orchestrateCmd)
+	rootCmd.AddCommand(serverCmd)
 }
 
 // Execute is the CLI entry point called from main.
@@ -112,6 +117,7 @@ type infraDeps struct {
 	provider string
 	builder  func(agents.Preset) *core.Agent
 	mem      *memory.PgVectorMemory // nil when --memory-dsn is not set
+	newAgent func() *core.Agent    // creates a fresh stateless agent per HTTP request
 	cleanup  func()
 }
 
@@ -261,6 +267,34 @@ func bootstrap(ctx context.Context) (context.Context, *infraDeps, error) {
 		return a
 	}
 
+	// newAgent creates a fresh stateless agent for each HTTP request.
+	// Uses the same provider/model/guardrail config as the main agent.
+	newAgent := func() *core.Agent {
+		var c llm.LLMClient
+		switch provider {
+		case providerOpenAI:
+			c = llm.NewOpenAIClient(llm.OpenAIConfig{APIKey: apiKey})
+		default:
+			c = llm.NewAnthropicClient(llm.AnthropicConfig{APIKey: apiKey})
+		}
+		a := core.NewAgent(core.AgentConfig{
+			Model:     model,
+			System:    system,
+			MaxSteps:  maxSteps,
+			MaxTokens: maxTokens,
+			Memory:    mem,
+		}, c, buildRegistry(), core.NewConversationBuffer(flags.tokenBudget))
+		a.Use(
+			guardrails.MaxSteps(maxSteps),
+			guardrails.TokenBudget(flags.tokenBudget),
+			guardrails.LoopDetection(5),
+		)
+		if flags.costBudget > 0 {
+			a.Use(guardrails.CostBudget(flags.costBudget))
+		}
+		return a
+	}
+
 	// Wrap cleanup to also close the memory pool.
 	baseCleanup := cleanup
 	cleanup = func() {
@@ -278,6 +312,7 @@ func bootstrap(ctx context.Context) (context.Context, *infraDeps, error) {
 		provider: provider,
 		builder:  builder,
 		mem:      mem,
+		newAgent: newAgent,
 		cleanup:  cleanup,
 	}
 	return ctx, deps, nil

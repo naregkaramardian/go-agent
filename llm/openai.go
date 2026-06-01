@@ -87,6 +87,9 @@ func (c *OpenAIClient) Stream(ctx context.Context, req *CompletionRequest) (<-ch
 	if err != nil {
 		return nil, fmt.Errorf("llm.OpenAIClient.Stream: %w", err)
 	}
+	params.StreamOptions = openai.ChatCompletionStreamOptionsParam{
+		IncludeUsage: openai.Bool(true),
+	}
 	ch := make(chan StreamChunk, 32)
 	go func() {
 		defer close(ch)
@@ -157,10 +160,6 @@ func (c *OpenAIClient) buildParams(req *CompletionRequest) (openai.ChatCompletio
 		Model:     openai.ChatModel(req.Model),
 		MaxTokens: openai.Int(int64(req.MaxTokens)),
 		Messages:  msgs,
-		// Request usage stats on the final streaming chunk.
-		StreamOptions: openai.ChatCompletionStreamOptionsParam{
-			IncludeUsage: openai.Bool(true),
-		},
 	}
 
 	if len(req.Tools) > 0 {

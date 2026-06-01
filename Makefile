@@ -17,6 +17,12 @@ orchestrate:
 	docker compose up -d postgres
 	docker compose run --rm --service-ports goagent orchestrate run --workflow $(WORKFLOW) "$(MSG)"
 
+## Start the agent HTTP API server. Usage: make server API_KEY=mysecret
+server:
+	docker compose up -d postgres
+	docker compose run --rm --service-ports \
+	  -e API_KEY=$(API_KEY) goagent server
+
 ## List available workflows and agent presets.
 list:
 	docker compose run --rm goagent orchestrate list

@@ -23,11 +23,13 @@ services:
         condition: service_healthy
     ports:
       - "9090:9090"
+      - "8080:8080"
     environment:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       MEMORY_DSN: postgres://goagent:goagent@postgres:5432/goagent
       LOG_FORMAT: ${LOG_FORMAT:-text}
+      API_KEY: ${API_KEY:-}
     stdin_open: true
     tty: true
 

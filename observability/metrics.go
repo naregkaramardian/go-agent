@@ -141,6 +141,20 @@ var (
 	}, []string{"workflow", "step"})
 )
 
+// HTTP API metrics.
+var (
+	HTTPRequestsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "goagent_http_requests_total",
+		Help: "HTTP API requests by method, path, and status.",
+	}, []string{"method", "path", "status"})
+
+	HTTPRequestDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "goagent_http_request_duration_seconds",
+		Help:    "HTTP API request latency.",
+		Buckets: prometheus.DefBuckets,
+	}, []string{"method", "path"})
+)
+
 // ServeMetrics starts the Prometheus /metrics endpoint and live /dashboard
 // on addr (e.g. ":9090"). Runs in a background goroutine; does not block.
 func ServeMetrics(addr string) {
