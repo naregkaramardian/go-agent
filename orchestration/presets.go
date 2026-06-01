@@ -182,7 +182,7 @@ func (r *fullPipelineRunner) Run(ctx context.Context, task string, w io.Writer) 
 	archResult, err := archAgent.RunStreaming(ctx, task, w)
 	fmt.Fprintln(w)
 	if err != nil {
-		return &Result{TotalCost: totalCost, Duration: archResult.Duration}, err
+		return &Result{TotalCost: totalCost}, err
 	}
 	allStepResults = append(allStepResults, StepResult{
 		Name: "Software Architect", Output: archResult.Output,

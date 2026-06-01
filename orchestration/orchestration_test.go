@@ -3,6 +3,7 @@ package orchestration_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -14,7 +15,11 @@ import (
 )
 
 // stubLLM returns a canned response so tests don't hit the network.
-type stubLLM struct{ response string }
+type stubLLM struct {
+	response string
+	err      error // if non-nil, Stream returns this error via chunk.Err
+}
+
 
 func (s *stubLLM) Complete(_ context.Context, _ *llm.CompletionRequest) (*llm.CompletionResponse, error) {
 	return &llm.CompletionResponse{
@@ -26,8 +31,12 @@ func (s *stubLLM) Complete(_ context.Context, _ *llm.CompletionRequest) (*llm.Co
 
 func (s *stubLLM) Stream(_ context.Context, _ *llm.CompletionRequest) (<-chan llm.StreamChunk, error) {
 	ch := make(chan llm.StreamChunk, 2)
-	ch <- llm.StreamChunk{TextDelta: s.response}
-	ch <- llm.StreamChunk{Usage: &llm.Usage{InputTokens: 10, OutputTokens: 20}}
+	if s.err != nil {
+		ch <- llm.StreamChunk{Err: s.err}
+	} else {
+		ch <- llm.StreamChunk{TextDelta: s.response}
+		ch <- llm.StreamChunk{Usage: &llm.Usage{InputTokens: 10, OutputTokens: 20}}
+	}
 	close(ch)
 	return ch, nil
 }
@@ -43,6 +52,20 @@ func newBuilder(response string) orchestration.Builder {
 			MaxSteps:  preset.MaxSteps,
 			MaxTokens: preset.MaxTokens,
 		}, &stubLLM{response: response}, reg, buf)
+	}
+}
+
+// newBuilderWithErr returns a Builder whose LLM always streams an error chunk.
+func newBuilderWithErr(err error) orchestration.Builder {
+	return func(preset agents.Preset) *core.Agent {
+		buf := core.NewConversationBuffer(10_000)
+		reg := tools.NewRegistry()
+		return core.NewAgent(core.AgentConfig{
+			Model:     "stub",
+			System:    preset.System,
+			MaxSteps:  preset.MaxSteps,
+			MaxTokens: preset.MaxTokens,
+		}, &stubLLM{err: err}, reg, buf)
 	}
 }
 
@@ -223,4 +246,25 @@ func TestResult_TotalCostAccumulates(t *testing.T) {
 		t.Errorf("Duration should not be negative")
 	}
 	_ = result.Duration.Round(time.Millisecond) // smoke-test Duration field
+}
+
+// Regression: ISSUE-001 — fullPipelineRunner.Run() nil pointer dereference
+// When the architect step fails, archResult is nil; accessing archResult.Duration panicked.
+// Found by /qa on 2026-06-01
+// Report: .gstack/qa-reports/qa-report-localhost-2026-06-01.md
+func TestFullPipeline_ArchitectError_DoesNotPanic(t *testing.T) {
+	ctx := context.Background()
+	wf, ok := orchestration.WorkflowByID("full-pipeline")
+	if !ok {
+		t.Fatal("full-pipeline workflow not found")
+	}
+	runner := wf.Build(newBuilderWithErr(errors.New("simulated LLM failure")))
+	var buf bytes.Buffer
+	result, err := runner.Run(ctx, "design a system", &buf)
+	if err == nil {
+		t.Fatal("expected an error, got nil")
+	}
+	if result == nil {
+		t.Fatal("Run must return a non-nil *Result even on error")
+	}
 }
