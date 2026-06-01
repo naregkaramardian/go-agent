@@ -3,7 +3,6 @@ package core
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -580,9 +579,6 @@ func drainStream(ch <-chan llm.StreamChunk, out io.Writer) (*llm.CompletionRespo
 		Usage:      usage,
 	}, nil
 }
-
-// errTerminal is used internally; kept unexported.
-var errTerminal = errors.New("terminal")
 
 // recallEnrich prepends relevant long-term memories to msg so the model has
 // context from past sessions. Returns msg unchanged when mem is nil or empty.
