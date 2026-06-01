@@ -28,3 +28,4 @@
 
 # Prometheus / OTel local data
 /data/
+.gstack/
