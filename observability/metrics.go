@@ -50,10 +50,6 @@ var (
 		Help: "Total tool errors by tool name.",
 	}, []string{"tool"})
 
-	ToolTimeoutsTotal = promauto.NewCounterVec(prometheus.CounterOpts{
-		Name: "goagent_tool_timeouts_total",
-		Help: "Total tool timeouts by tool name.",
-	}, []string{"tool"})
 )
 
 // Agent metrics.
